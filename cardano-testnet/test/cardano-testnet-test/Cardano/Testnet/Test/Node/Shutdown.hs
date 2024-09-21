@@ -21,6 +21,7 @@ import           Control.Monad
 import           Data.Aeson
 import           Data.Aeson.Types
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import           Data.Default.Class
 import           Data.Either (isRight)
 import qualified Data.List as L
 import           Data.Maybe
@@ -39,6 +40,7 @@ import           Testnet.Defaults
 import           Testnet.Process.Run (execCli_, initiateProcess, procNode)
 import           Testnet.Property.Util (integrationRetryWorkspace)
 import           Testnet.Start.Byron
+import           Testnet.Start.Types
 import           Testnet.Types
 
 import           Hedgehog (Property, (===))
@@ -66,7 +68,7 @@ hprop_shutdown = integrationRetryWorkspace 2 "shutdown" $ \tempAbsBasePath' -> H
       logDir' = makeLogDir $ tempAbsPath conf
       socketDir' = makeSocketDir $ tempAbsPath conf
       testnetMagic' = 42
-      era = BabbageEra
+      sbe = ShelleyBasedEraBabbage
 
   -- TODO: We need to uniformly create these directories
   H.createDirectoryIfMissing_ logDir'
@@ -102,7 +104,7 @@ hprop_shutdown = integrationRetryWorkspace 2 "shutdown" $ \tempAbsBasePath' -> H
 
   -- 2. Create Alonzo genesis
   alonzoBabbageTestGenesisJsonTargetFile <- H.noteShow $ tempAbsPath' </> shelleyDir </> "genesis.alonzo.spec.json"
-  gen <- Testnet.getDefaultAlonzoGenesis era
+  gen <- Testnet.getDefaultAlonzoGenesis sbe
   H.evalIO $ LBS.writeFile alonzoBabbageTestGenesisJsonTargetFile $ encode gen
 
   -- 2. Create Conway genesis
@@ -131,7 +133,7 @@ hprop_shutdown = integrationRetryWorkspace 2 "shutdown" $ \tempAbsBasePath' -> H
                                  $ mconcat [ byronGenesisHash
                                            , shelleyGenesisHash
                                            , alonzoGenesisHash
-                                           , defaultYamlHardforkViaConfig (AnyCardanoEra era)]
+                                           , defaultYamlHardforkViaConfig sbe]
 
   H.evalIO $ LBS.writeFile (tempAbsPath' </> "configuration.yaml") finalYamlConfig
 
@@ -192,16 +194,18 @@ hprop_shutdownOnSlotSynced = integrationRetryWorkspace 2 "shutdown-on-slot-synce
 
   let maxSlot = 150
       slotLen = 0.01
-  let fastTestnetOptions = cardanoDefaultTestnetOptions
-        { cardanoEpochLength = 300
-        , cardanoSlotLength = slotLen
-        , cardanoNodes =
+  let fastTestnetOptions = def
+        { cardanoNodes =
           [ SpoTestnetNodeOptions Nothing ["--shutdown-on-slot-synced", show maxSlot]
           , SpoTestnetNodeOptions Nothing []
           , SpoTestnetNodeOptions Nothing []
           ]
         }
-  testnetRuntime <- cardanoTestnetDefault fastTestnetOptions conf
+      shelleyOptions = def
+        { shelleyEpochLength = 300
+        , shelleySlotLength = slotLen
+        }
+  testnetRuntime <- cardanoTestnetDefault fastTestnetOptions shelleyOptions conf
   let allNodes' = poolNodes testnetRuntime
   H.note_ $ "All nodes: " <>  show (map (nodeName . poolRuntime) allNodes')
 
@@ -239,11 +243,10 @@ hprop_shutdownOnSigint = integrationRetryWorkspace 2 "shutdown-on-sigint" $ \tem
   -- TODO: Move yaml filepath specification into individual node options
   conf <- mkConf tempAbsBasePath'
 
-  let fastTestnetOptions = cardanoDefaultTestnetOptions
-        { cardanoEpochLength = 300
-        }
+  let fastTestnetOptions = def
+      shelleyOptions = def { shelleyEpochLength = 300 }
   testnetRuntime
-    <- cardanoTestnetDefault fastTestnetOptions conf
+    <- cardanoTestnetDefault fastTestnetOptions shelleyOptions conf
   node@NodeRuntime{nodeProcessHandle} <- H.headM $ poolRuntime <$> poolNodes testnetRuntime
 
   -- send SIGINT

@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Cardano.Testnet.Test.Cli.Babbage.StakeSnapshot
+module Cardano.Testnet.Test.Cli.StakeSnapshot
   ( hprop_stakeSnapshot
   ) where
 
@@ -17,6 +17,7 @@ import           Prelude
 import           Control.Monad
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
+import           Data.Default.Class
 import qualified System.Info as SYS
 
 import           Testnet.Process.Run (execCliStdoutToJson, mkExecConfig)
@@ -30,25 +31,17 @@ import qualified Hedgehog.Extras.Test.Base as H
 import qualified Hedgehog.Extras.Test.TestWatchdog as H
 
 hprop_stakeSnapshot :: Property
-hprop_stakeSnapshot = integrationRetryWorkspace 2 "babbage-stake-snapshot" $ \tempAbsBasePath' -> H.runWithDefaultWatchdog_ $ do
+hprop_stakeSnapshot = integrationRetryWorkspace 2 "stake-snapshot" $ \tempAbsBasePath' -> H.runWithDefaultWatchdog_ $ do
   H.note_ SYS.os
   conf@Conf { tempAbsPath } <- mkConf tempAbsBasePath'
   let tempAbsPath' = unTmpAbsPath tempAbsPath
-
-  let
-    tempBaseAbsPath = makeTmpBaseAbsPath $ TmpAbsolutePath tempAbsPath'
-    era = BabbageEra
-    options = cardanoDefaultTestnetOptions
-                        { cardanoNodes = cardanoDefaultTestnetNodeOptions
-                        , cardanoSlotLength = 0.1
-                        , cardanoNodeEra = AnyCardanoEra era -- TODO: We should only support the latest era and the upcoming era
-                        }
+      tempBaseAbsPath = makeTmpBaseAbsPath $ TmpAbsolutePath tempAbsPath'
 
   TestnetRuntime
     { testnetMagic
     , poolNodes
     , configurationFile
-    } <- cardanoTestnetDefault options conf
+    } <- cardanoTestnetDefault def def conf
 
   poolNode1 <- H.headM poolNodes
   poolSprocket1 <- H.noteShow $ nodeSprocket $ poolRuntime poolNode1

@@ -25,9 +25,7 @@ import           Cardano.Logging
 import           Cardano.Node.Configuration.POM (NodeConfiguration, ncProtocol)
 import           Cardano.Node.Configuration.Socket
 import           Cardano.Node.Protocol (SomeConsensusProtocol (..))
-
 import           Cardano.Node.Startup
-
 import           Cardano.Slotting.Slot (EpochSize (..))
 import qualified Ouroboros.Consensus.BlockchainTime.WallClock.Types as WCT
 import           Ouroboros.Consensus.Byron.Ledger.Conversions (fromByronEpochSlots,
@@ -56,7 +54,6 @@ import           Data.Text (Text, pack)
 import           Data.Time (getCurrentTime)
 import           Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
 import           Data.Version (showVersion)
-
 import           Network.Socket (SockAddr)
 
 import           Paths_cardano_node (version)
@@ -285,6 +282,8 @@ instance ( Show (BlockNodeToNodeVersion blk)
         DisabledBlockForging -> 0
         NotEffective -> 0
       )]
+  asMetrics (BICommon BasicInfoCommon {..}) =
+    [ PrometheusM "basicInfo" [("nodeStartTime", (pack . show) biNodeStartTime)]]
   asMetrics _ = []
 
 instance MetaTrace  (StartupTrace blk) where
@@ -409,6 +408,8 @@ instance MetaTrace  (StartupTrace blk) where
 
   metricsDocFor (Namespace _ ["BlockForgingUpdate"]) =
     [("forging_enabled","Can this node forge blocks? (Is it provided with block forging credentials) 0 = no, 1 = yes")]
+  metricsDocFor (Namespace _ ["Common"]) =
+    [("systemStartTime","The UTC time this node was started.")]
 
 
   metricsDocFor _ = []
@@ -436,7 +437,6 @@ instance MetaTrace  (StartupTrace blk) where
     , Namespace [] ["Network"]
     ]
 
-
 nodeToClientVersionToInt :: NodeToClientVersion -> Int
 nodeToClientVersionToInt = \case
   NodeToClientV_9 -> 9
@@ -447,6 +447,7 @@ nodeToClientVersionToInt = \case
   NodeToClientV_14 -> 14
   NodeToClientV_15 -> 15
   NodeToClientV_16 -> 16
+  NodeToClientV_17 -> 17
 
 nodeToNodeVersionToInt :: NodeToNodeVersion -> Int
 nodeToNodeVersionToInt = \case

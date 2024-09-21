@@ -9,7 +9,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {- HLINT ignore "Redundant id" -}
 
-module Cardano.Testnet.Test.Cli.Babbage.LeadershipSchedule
+module Cardano.Testnet.Test.Cli.LeadershipSchedule
   ( hprop_leadershipSchedule
   ) where
 
@@ -25,6 +25,7 @@ import           Control.Monad (void)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson as J
 import qualified Data.Aeson.Types as J
+import           Data.Default.Class
 import           Data.List ((\\))
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
@@ -46,6 +47,7 @@ import           Testnet.Types
 
 import           Hedgehog (Property, (===))
 import qualified Hedgehog as H
+import qualified Hedgehog.Extras.Stock.IO.Network.Port as H
 import qualified Hedgehog.Extras.Stock.IO.Network.Sprocket as IO
 import qualified Hedgehog.Extras.Test.Base as H
 import qualified Hedgehog.Extras.Test.File as H
@@ -54,35 +56,30 @@ import qualified Hedgehog.Extras.Test.TestWatchdog as H
 -- | Execute me with:
 -- @DISABLE_RETRIES=1 cabal test cardano-testnet-test --test-options '-p "/leadership-schedule/"'@
 hprop_leadershipSchedule :: Property
-hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-schedule" $ \tempAbsBasePath' -> H.runWithDefaultWatchdog_ $ do
+hprop_leadershipSchedule = integrationRetryWorkspace 2 "leadership-schedule" $ \tempAbsBasePath' -> H.runWithDefaultWatchdog_ $ do
   H.note_ SYS.os
   conf@Conf { tempAbsPath=tempAbsPath@(TmpAbsolutePath work) } <- mkConf tempAbsBasePath'
   let tempBaseAbsPath = makeTmpBaseAbsPath tempAbsPath
-
-  let era = BabbageEra
-      cTestnetOptions = cardanoDefaultTestnetOptions
-                          { cardanoNodes = cardanoDefaultTestnetNodeOptions
-                          , cardanoNodeEra = AnyCardanoEra era -- TODO: We should only support the latest era and the upcoming era
-                          , cardanoActiveSlotsCoeff = 0.1
-                          }
+      sbe = shelleyBasedEra @ConwayEra -- TODO: We should only support the latest era and the upcoming era
+      asbe = AnyShelleyBasedEra sbe
+      cTestnetOptions = def { cardanoNodeEra = asbe }
+      eraString = eraToString sbe
 
   tr@TestnetRuntime
     { testnetMagic
     , wallets=wallet0:_
     , configurationFile
     , poolNodes
-    } <- cardanoTestnetDefault cTestnetOptions conf
+    } <- cardanoTestnetDefault cTestnetOptions def conf
 
   node1sprocket <- H.headM $ poolSprockets tr
   execConfig <- mkExecConfig tempBaseAbsPath node1sprocket testnetMagic
-
-  let sbe = shelleyBasedEra @BabbageEra
 
   ----------------Need to register an SPO------------------
   let utxoAddr = Text.unpack $ paymentKeyInfoAddr wallet0
       utxoSKeyFile = signingKeyFp $ paymentKeyInfoPair wallet0
   void $ execCli' execConfig
-    [ "conway", "query", "utxo"
+    [ eraString, "query", "utxo"
     , "--address", utxoAddr
     , "--cardano-mode"
     , "--out-file", work </> "utxo-1.json"
@@ -94,11 +91,11 @@ hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-sched
   let node1SocketPath = Api.File $ IO.sprocketSystemName node1sprocket
       termEpoch = EpochNo 15
   (stakePoolIdNewSpo, stakePoolColdSigningKey, stakePoolColdVKey, vrfSkey, _)
-    <- registerSingleSpo 1 tempAbsPath
+    <- registerSingleSpo asbe 1 tempAbsPath
          configurationFile
          node1SocketPath
          (EpochNo 10)
-         cTestnetOptions
+         testnetMagic
          execConfig
          (txin1, utxoSKeyFile, utxoAddr)
 
@@ -141,13 +138,13 @@ hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-sched
     tempAbsPath
     (cardanoNodeEra cTestnetOptions)
     testDelegatorVkeyFp
-    2_000_000
+    0
     testDelegatorRegCertFp
 
   -- Test stake address deleg  cert
   createStakeDelegationCertificate
     tempAbsPath
-    (cardanoNodeEra cTestnetOptions)
+    sbe
     testDelegatorVkeyFp
     stakePoolIdNewSpo
     testDelegatorDelegCert
@@ -168,8 +165,7 @@ hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-sched
   UTxO utxo2 <- H.noteShowM $ decodeEraUTxO sbe utxo2Json
   txin2 <- H.noteShow =<< H.headM (Map.keys utxo2)
 
-  let eraString = anyEraToString $ cardanoNodeEra cTestnetOptions
-      delegRegTestDelegatorTxBodyFp = work </> "deleg-register-test-delegator.txbody"
+  let delegRegTestDelegatorTxBodyFp = work </> "deleg-register-test-delegator.txbody"
 
   void $ execCli' execConfig
     [ eraString
@@ -220,7 +216,7 @@ hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-sched
   let valency = 1
       topology = RealNodeTopology $
         flip map poolNodes $ \PoolNode{poolRuntime=NodeRuntime{nodeIpv4,nodePort}} ->
-          RemoteAddress nodeIpv4 nodePort valency
+          RemoteAddress (showIpv4Address nodeIpv4) nodePort valency
   H.lbsWriteFile topologyFile $ Aeson.encode topology
   let testSpoKesVKey = work </> "kes.vkey"
       testSpoKesSKey = work </> "kes.skey"
@@ -246,10 +242,11 @@ hprop_leadershipSchedule = integrationRetryWorkspace 2 "babbage-leadership-sched
       , "--out-file", testSpoOperationalCertFp
       ]
 
-  jsonBS <- createConfigJson tempAbsPath (cardanoNodeEra cTestnetOptions)
+  jsonBS <- createConfigJson tempAbsPath sbe
   H.lbsWriteFile (unFile configurationFile) jsonBS
-  [newNodePort] <- requestAvailablePortNumbers 1
-  eRuntime <- runExceptT $ startNode (TmpAbsolutePath work) "test-spo" "127.0.0.1" newNodePort testnetMagic
+  newNodePort <- H.randomPort testnetDefaultIpv4Address
+  eRuntime <- runExceptT . retryOnAddressInUseError $
+    startNode (TmpAbsolutePath work) "test-spo" testnetDefaultIpv4Address newNodePort testnetMagic
         [ "run"
         , "--config", unFile configurationFile
         , "--topology", topologyFile

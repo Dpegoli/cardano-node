@@ -6,12 +6,11 @@ module Cardano.Testnet (
   -- ** Start a testnet
   cardanoTestnet,
   cardanoTestnetDefault,
-  requestAvailablePortNumbers,
+  retryOnAddressInUseError,
 
   -- ** Testnet options
   CardanoTestnetOptions(..),
   TestnetNodeOptions(..),
-  cardanoDefaultTestnetOptions,
   cardanoDefaultTestnetNodeOptions,
   getDefaultAlonzoGenesis,
   getDefaultShelleyGenesis,

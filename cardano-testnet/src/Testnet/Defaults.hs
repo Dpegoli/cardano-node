@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -31,8 +32,8 @@ module Testnet.Defaults
   , plutusV3Script
   ) where
 
-import           Cardano.Api (AnyCardanoEra (..), CardanoEra (..), File (..), pshow,
-                   unsafeBoundedRational)
+import           Cardano.Api (CardanoEra (..), File (..), pshow, ShelleyBasedEra (..),
+                   toCardanoEra, unsafeBoundedRational, AnyShelleyBasedEra (..))
 import qualified Cardano.Api.Shelley as Api
 
 import           Cardano.Ledger.Alonzo.Core (PParams (..))
@@ -67,6 +68,7 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Time (UTCTime)
 import qualified Data.Vector as Vector
+import           Data.Word (Word64)
 import           Lens.Micro
 import           Numeric.Natural
 import           System.FilePath ((</>))
@@ -86,9 +88,9 @@ newtype AlonzoGenesisError
   = AlonzoGenErrTooMuchPrecision Rational
   deriving Show
 
-defaultAlonzoGenesis :: CardanoEra era -> Either AlonzoGenesisError AlonzoGenesis
-defaultAlonzoGenesis era = do
-  let genesis = Api.alonzoGenesisDefaults era
+defaultAlonzoGenesis :: ShelleyBasedEra era -> Either AlonzoGenesisError AlonzoGenesis
+defaultAlonzoGenesis sbe = do
+  let genesis = Api.alonzoGenesisDefaults (toCardanoEra sbe)
       prices = Ledger.agPrices genesis
 
   -- double check that prices have correct values - they're set using unsafeBoundedRational in cardano-api
@@ -150,13 +152,13 @@ defaultConwayGenesis =
 
 -- | Configuration value that allows you to hardfork to any Cardano era
 -- at epoch 0.
-defaultYamlHardforkViaConfig :: AnyCardanoEra -> KeyMapAeson.KeyMap Aeson.Value
-defaultYamlHardforkViaConfig era =
+defaultYamlHardforkViaConfig :: ShelleyBasedEra era -> KeyMapAeson.KeyMap Aeson.Value
+defaultYamlHardforkViaConfig sbe =
   mconcat $ concat
     [ defaultYamlConfig
     , tracers
-    , protocolVersions era
-    , hardforkViaConfig era
+    , protocolVersions sbe
+    , hardforkViaConfig sbe
     ]
 
  where
@@ -164,47 +166,40 @@ defaultYamlHardforkViaConfig era =
   -- of the system for agreeing on and synchronising protocol updates.
   -- NB: We follow the mainnet protocol versions and assume the latest
   -- protocol version for a given era that has had an intraera hardfork.
-  protocolVersions :: AnyCardanoEra -> [KeyMapAeson.KeyMap Aeson.Value]
-  protocolVersions (AnyCardanoEra era') =
-    case era' of
-      ByronEra ->
-        map (uncurry KeyMapAeson.singleton)
-          -- We assume Byron with Ouroboros permissive BFT
-          [ ("LastKnownBlockVersion-Major", Aeson.Number 1)
-          , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
-          , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
-          ]
-      ShelleyEra ->
+  protocolVersions :: ShelleyBasedEra era -> [KeyMapAeson.KeyMap Aeson.Value]
+  protocolVersions sbe' =
+    case sbe' of
+      ShelleyBasedEraShelley ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 2)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
           , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
           ]
-      AllegraEra ->
+      ShelleyBasedEraAllegra ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 3)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
           , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
           ]
-      MaryEra ->
+      ShelleyBasedEraMary ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 4)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
           , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
           ]
-      AlonzoEra ->
+      ShelleyBasedEraAlonzo ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 5)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
           , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
           ]
-      BabbageEra ->
+      ShelleyBasedEraBabbage ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 8)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
           , ("LastKnownBlockVersion-Alt", Aeson.Number 0)
           ]
-      ConwayEra ->
+      ShelleyBasedEraConway ->
         map (uncurry KeyMapAeson.singleton)
           [ ("LastKnownBlockVersion-Major", Aeson.Number 9)
           , ("LastKnownBlockVersion-Minor", Aeson.Number 0)
@@ -214,24 +209,23 @@ defaultYamlHardforkViaConfig era =
   -- Allows a direct hardfork to an era of your choice via the configuration.
   -- This removes the usual requirement for submitting an update proposal,
   -- waiting for the protocol to change and then restarting the nodes.
-  hardforkViaConfig :: AnyCardanoEra -> [KeyMapAeson.KeyMap Aeson.Value]
-  hardforkViaConfig (AnyCardanoEra era') =
-    case era' of
-      ByronEra -> []
-      ShelleyEra ->
+  hardforkViaConfig :: ShelleyBasedEra era -> [KeyMapAeson.KeyMap Aeson.Value]
+  hardforkViaConfig sbe' =
+    case sbe' of
+      ShelleyBasedEraShelley ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
           , ("TestShelleyHardForkAtEpoch", Aeson.Number 0)
           ]
-      AllegraEra ->
+      ShelleyBasedEraAllegra ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
           , ("TestShelleyHardForkAtEpoch", Aeson.Number 0)
           , ("TestAllegraHardForkAtEpoch", Aeson.Number 0)
           ]
-      MaryEra ->
+      ShelleyBasedEraMary ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
@@ -239,7 +233,7 @@ defaultYamlHardforkViaConfig era =
           , ("TestAllegraHardForkAtEpoch", Aeson.Number 0)
           , ("TestMaryHardForkAtEpoch", Aeson.Number 0)
           ]
-      AlonzoEra ->
+      ShelleyBasedEraAlonzo ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
@@ -248,7 +242,7 @@ defaultYamlHardforkViaConfig era =
           , ("TestMaryHardForkAtEpoch", Aeson.Number 0)
           , ("TestAlonzoHardForkAtEpoch", Aeson.Number 0)
           ]
-      BabbageEra ->
+      ShelleyBasedEraBabbage ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
@@ -258,7 +252,7 @@ defaultYamlHardforkViaConfig era =
           , ("TestAlonzoHardForkAtEpoch", Aeson.Number 0)
           , ("TestBabbageHardForkAtEpoch", Aeson.Number 0)
           ]
-      ConwayEra ->
+      ShelleyBasedEraConway ->
         map (uncurry KeyMapAeson.singleton)
           [ ("ExperimentalHardForksEnabled", Aeson.Bool True)
           , ("ExperimentalProtocolsEnabled", Aeson.Bool True)
@@ -423,31 +417,31 @@ defaultByronProtocolParamsJsonValue =
     ]
 
 defaultShelleyGenesis
-  :: UTCTime
-  -> CardanoTestnetOptions
+  :: AnyShelleyBasedEra
+  -> UTCTime
+  -> Word64
+  -> ShelleyTestnetOptions
   -> Api.ShelleyGenesis StandardCrypto
-defaultShelleyGenesis startTime testnetOptions = do
-  let CardanoTestnetOptions
-        { cardanoTestnetMagic = testnetMagic
-        , cardanoSlotLength = slotLength
-        , cardanoEpochLength = epochLength
-        , cardanoMaxSupply = sgMaxLovelaceSupply
-        , cardanoActiveSlotsCoeff
-        , cardanoNodeEra
-        } = testnetOptions
+defaultShelleyGenesis asbe startTime maxSupply options = do
+  let ShelleyTestnetOptions
+        { shelleyTestnetMagic = magic
+        , shelleySlotLength = slotLength
+        , shelleyEpochLength = epochLength
+        , shelleyActiveSlotsCoeff
+        } = options
       -- f
-      activeSlotsCoeff = round (cardanoActiveSlotsCoeff * 100) % 100
+      activeSlotsCoeff = round (shelleyActiveSlotsCoeff * 100) % 100
       -- make security param k satisfy: epochLength = 10 * k / f
       -- TODO: find out why this actually degrates network stability - turned off for now
       -- securityParam = ceiling $ fromIntegral epochLength * cardanoActiveSlotsCoeff / 10
-      pVer = eraToProtocolVersion cardanoNodeEra
+      pVer = eraToProtocolVersion asbe
       protocolParams = Api.sgProtocolParams Api.shelleyGenesisDefaults
       protocolParamsWithPVer = protocolParams & ppProtocolVersionL' .~ pVer
   Api.shelleyGenesisDefaults
         { Api.sgActiveSlotsCoeff = unsafeBoundedRational activeSlotsCoeff
         , Api.sgEpochLength = EpochSize $ fromIntegral epochLength
-        , Api.sgMaxLovelaceSupply
-        , Api.sgNetworkMagic = fromIntegral testnetMagic
+        , Api.sgMaxLovelaceSupply = maxSupply
+        , Api.sgNetworkMagic = fromIntegral magic
         , Api.sgProtocolParams = protocolParamsWithPVer
         -- using default from shelley genesis k = 2160
         -- , Api.sgSecurityParam = securityParam
@@ -456,19 +450,18 @@ defaultShelleyGenesis startTime testnetOptions = do
         }
 
 
-eraToProtocolVersion :: AnyCardanoEra -> ProtVer
-eraToProtocolVersion (AnyCardanoEra era) =
-  case era of
-    ByronEra -> error "eraToProtocolVersion: Byron not supported"
-    ShelleyEra -> mkProtVer (2, 0)
-    AllegraEra -> mkProtVer (3, 0)
-    MaryEra -> mkProtVer (4, 0)
+eraToProtocolVersion :: AnyShelleyBasedEra -> ProtVer
+eraToProtocolVersion =
+  \case
+    AnyShelleyBasedEra ShelleyBasedEraShelley -> mkProtVer (2, 0)
+    AnyShelleyBasedEra ShelleyBasedEraAllegra -> mkProtVer (3, 0)
+    AnyShelleyBasedEra ShelleyBasedEraMary -> mkProtVer (4, 0)
     -- Alonzo had an intra-era hardfork
-    AlonzoEra -> mkProtVer (6, 0)
+    AnyShelleyBasedEra ShelleyBasedEraAlonzo -> mkProtVer (6, 0)
     -- Babbage had an intra-era hardfork
-    BabbageEra -> mkProtVer (8, 0)
+    AnyShelleyBasedEra ShelleyBasedEraBabbage -> mkProtVer (8, 0)
     -- By default start after bootstrap (which is PV9)
-    ConwayEra -> mkProtVer (10, 0)
+    AnyShelleyBasedEra ShelleyBasedEraConway -> mkProtVer (10, 0)
 
 -- TODO: Expose from cardano-api
 mkProtVer :: (Natural, Natural) -> ProtVer

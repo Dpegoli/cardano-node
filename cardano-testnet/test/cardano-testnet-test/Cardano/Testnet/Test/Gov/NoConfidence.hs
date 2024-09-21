@@ -22,6 +22,7 @@ import           Prelude
 
 import           Control.Monad
 import qualified Data.ByteString.Char8 as BSC
+import           Data.Default.Class
 import qualified Data.Map.Strict as Map
 import           Data.Maybe.Strict
 import           Data.String
@@ -40,6 +41,7 @@ import qualified Testnet.Process.Cli.SPO as SPO
 import           Testnet.Process.Cli.Transaction
 import qualified Testnet.Process.Run as H
 import           Testnet.Property.Util (integrationWorkspace)
+import           Testnet.Start.Types
 import           Testnet.Types
 
 import           Hedgehog
@@ -60,15 +62,14 @@ hprop_gov_no_confidence = integrationWorkspace "no-confidence" $ \tempAbsBasePat
 
   work <- H.createDirectoryIfMissing $ tempAbsPath' </> "work"
 
-
   let ceo = ConwayEraOnwardsConway
       sbe = conwayEraOnwardsToShelleyBasedEra ceo
+      asbe = AnyShelleyBasedEra sbe
       era = toCardanoEra sbe
       cEra = AnyCardanoEra era
-      fastTestnetOptions = cardanoDefaultTestnetOptions
-        { cardanoEpochLength = 200
-        , cardanoNodeEra = cEra
-        }
+      fastTestnetOptions = def { cardanoNodeEra = asbe  }
+      shelleyOptions = def { shelleyEpochLength = 200 }
+
   execConfigOffline <- H.mkExecConfigOffline tempBaseAbsPath
 
   -- Step 1. Define generate and define a committee in the genesis file
@@ -77,7 +78,7 @@ hprop_gov_no_confidence = integrationWorkspace "no-confidence" $ \tempAbsBasePat
   H.createDirectoryIfMissing_ $ tempAbsPath' </> work </> "committee-keys"
   H.forConcurrently_ [1] $ \n -> do
     H.execCli' execConfigOffline
-      [ anyEraToString cEra, "governance", "committee"
+      [ eraToString sbe, "governance", "committee"
       , "key-gen-cold"
       , "--cold-verification-key-file", work </> defaultCommitteeVkeyFp n
       , "--cold-signing-key-file", work </> defaultCommitteeSkeyFp n
@@ -88,7 +89,7 @@ hprop_gov_no_confidence = integrationWorkspace "no-confidence" $ \tempAbsBasePat
   -- Read committee cold keys from disk to put into conway genesis
 
   comKeyHash1Str <- filter (/= '\n') <$> H.execCli' execConfigOffline
-      [ anyEraToString cEra, "governance", "committee"
+      [ eraToString sbe, "governance", "committee"
       , "key-hash"
       , "--verification-key-file", committeeVkey1Fp
       ]
@@ -102,8 +103,12 @@ hprop_gov_no_confidence = integrationWorkspace "no-confidence" $ \tempAbsBasePat
       committeeThreshold = unsafeBoundedRational 0.5
       committee = L.Committee (Map.fromList [(comKeyCred1, EpochNo 100)]) committeeThreshold
 
-  alonzoGenesis <- getDefaultAlonzoGenesis era
-  (startTime, shelleyGenesis') <- getDefaultShelleyGenesis fastTestnetOptions
+  alonzoGenesis <- getDefaultAlonzoGenesis sbe
+  shelleyGenesis' <-
+    getDefaultShelleyGenesis
+      asbe
+      (cardanoMaxSupply fastTestnetOptions)
+      shelleyOptions
   let conwayGenesisWithCommittee =
         defaultConwayGenesis { L.cgCommittee = committee }
 
@@ -114,7 +119,7 @@ hprop_gov_no_confidence = integrationWorkspace "no-confidence" $ \tempAbsBasePat
     , configurationFile
     } <- cardanoTestnet
            fastTestnetOptions
-           conf startTime shelleyGenesis'
+           conf shelleyGenesis'
            alonzoGenesis conwayGenesisWithCommittee
 
   poolNode1 <- H.headM poolNodes

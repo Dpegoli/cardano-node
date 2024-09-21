@@ -23,6 +23,7 @@ import           Prelude
 
 import           Control.Monad
 import qualified Data.Char as C
+import           Data.Default.Class
 import qualified Data.Map as Map
 import           Data.Maybe.Strict
 import           Data.Set (Set)
@@ -44,10 +45,13 @@ import           Testnet.Process.Cli.Transaction
 import           Testnet.Process.Run (execCli', mkExecConfig)
 import           Testnet.Property.Util (integrationWorkspace)
 import           Testnet.Types
+import           Testnet.Start.Types (ShelleyTestnetOptions(..))
 
 import           Hedgehog
 import qualified Hedgehog.Extras as H
 
+-- | Execute me with:
+-- @DISABLE_RETRIES=1 cabal test cardano-testnet-test --test-options '-p "/Committee Add New/"'@
 hprop_constitutional_committee_add_new :: Property
 hprop_constitutional_committee_add_new = integrationWorkspace "constitutional-committee-add-new" $ \tempAbsBasePath' -> H.runWithDefaultWatchdog_ $ do
   conf@Conf { tempAbsPath } <- mkConf tempAbsBasePath'
@@ -71,11 +75,11 @@ hprop_constitutional_committee_add_new = integrationWorkspace "constitutional-co
       era = toCardanoEra sbe
       cEra = AnyCardanoEra era
       eraName = eraToString era
-      fastTestnetOptions = cardanoDefaultTestnetOptions
-        { cardanoEpochLength = 200
-        , cardanoNodeEra = cEra
+      fastTestnetOptions = def
+        { cardanoNodeEra = AnyShelleyBasedEra sbe
         , cardanoNumDReps = nDrepVotes
         }
+      shelleyOptions = def { shelleyEpochLength = 200 }
 
   TestnetRuntime
     { testnetMagic
@@ -83,7 +87,7 @@ hprop_constitutional_committee_add_new = integrationWorkspace "constitutional-co
     , wallets=wallet0:_
     , configurationFile
     }
-    <- cardanoTestnetDefault fastTestnetOptions conf
+    <- cardanoTestnetDefault fastTestnetOptions shelleyOptions conf
 
   PoolNode{poolRuntime, poolKeys} <- H.headM poolNodes
   poolSprocket1 <- H.noteShow $ nodeSprocket poolRuntime
@@ -157,7 +161,7 @@ hprop_constitutional_committee_add_new = integrationWorkspace "constitutional-co
   txbodyFp <- H.note $ work </> "tx.body"
   txin1 <- findLargestUtxoForPaymentKey epochStateView sbe wallet0
   void $ execCli' execConfig
-    [ eraToString era, "transaction", "build"
+    [ eraName, "transaction", "build"
     , "--change-address", Text.unpack $ paymentKeyInfoAddr wallet0
     , "--tx-in", Text.unpack $ renderTxIn txin1
     , "--tx-out", Text.unpack (paymentKeyInfoAddr wallet0) <> "+" <> show @Int 5_000_000

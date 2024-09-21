@@ -16,6 +16,7 @@ import           Prelude
 import           Control.Monad
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
+import           Data.Default.Class
 import qualified System.Info as SYS
 
 import           Testnet.Process.Run (execCliStdoutToJson, mkExecConfig)
@@ -33,20 +34,13 @@ hprop_stakeSnapshot = integrationRetryWorkspace 2 "conway-stake-snapshot" $ \tem
   H.note_ SYS.os
   conf@Conf { tempAbsPath } <- mkConf tempAbsBasePath'
   let tempAbsPath' = unTmpAbsPath tempAbsPath
-
-  let
-    tempBaseAbsPath = makeTmpBaseAbsPath $ TmpAbsolutePath tempAbsPath'
-    era = BabbageEra
-    options = cardanoDefaultTestnetOptions
-                        { cardanoNodes = cardanoDefaultTestnetNodeOptions
-                        , cardanoNodeEra = AnyCardanoEra era -- TODO: We should only support the latest era and the upcoming era
-                        }
+      tempBaseAbsPath = makeTmpBaseAbsPath $ TmpAbsolutePath tempAbsPath'
 
   TestnetRuntime
     { testnetMagic
     , poolNodes
     , configurationFile
-    } <- cardanoTestnetDefault options conf
+    } <- cardanoTestnetDefault def def conf
 
   poolNode1 <- H.headM poolNodes
   poolSprocket1 <- H.noteShow $ nodeSprocket $ poolRuntime poolNode1
