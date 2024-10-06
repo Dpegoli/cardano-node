@@ -71,8 +71,8 @@ import qualified Hedgehog.Extras.Stock.OS as OS
 
 -- | There are certain conditions that need to be met in order to run
 -- a valid node cluster.
-testnetMinimumConfigurationRequirements :: MonadTest m => NumPools -> m ()
-testnetMinimumConfigurationRequirements (NumPools n) =
+testnetMinimumConfigurationRequirements :: HasCallStack => MonadTest m => NumPools -> m ()
+testnetMinimumConfigurationRequirements (NumPools n) = withFrozenCallStack $
   when (n < 2) $ do
      H.noteShow_ ("Need at least two nodes to run a cluster, but got: " <> show n)
      H.failure
@@ -88,14 +88,14 @@ data ForkPoint
 startTimeOffsetSeconds :: DTC.NominalDiffTime
 startTimeOffsetSeconds = if OS.isWin32 then 90 else 15
 
--- | Like 'cardanoTestnet', but using 'ShelleyTestnetOptions' to obtain
+-- | Like 'cardanoTestnet', but using 'GenesisOptions' to obtain
 -- the genesis files, instead of passing them directly.
 -- See 'cardanoTestnet' for additional documentation.
 cardanoTestnetDefault
   :: ()
   => HasCallStack
   => CardanoTestnetOptions
-  -> ShelleyTestnetOptions
+  -> GenesisOptions
   -> Conf
   -> H.Integration TestnetRuntime
 cardanoTestnetDefault testnetOptions shelleyOptions conf = do
@@ -121,7 +121,7 @@ getDefaultShelleyGenesis :: ()
   => MonadTest m
   => AnyShelleyBasedEra
   -> Word64 -- ^ The max supply
-  -> ShelleyTestnetOptions
+  -> GenesisOptions
   -> m (ShelleyGenesis StandardCrypto)
 getDefaultShelleyGenesis asbe maxSupply opts = do
   currentTime <- H.noteShowIO DTC.getCurrentTime
@@ -347,6 +347,8 @@ cardanoTestnet
     unless (null failedNodes) $ do
       H.noteShow_ . vsep $ prettyError <$> failedNodes
       H.failure
+
+    H.annotateShow $ nodeSprocket . poolRuntime <$> poolNodes
 
     -- FIXME: use foldEpochState waiting for chain extensions
     now <- H.noteShowIO DTC.getCurrentTime
